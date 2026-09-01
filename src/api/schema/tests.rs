@@ -702,6 +702,15 @@ fn session_snapshot_request_and_response_round_trip() {
                 panes: Vec::new(),
                 layouts: Vec::new(),
                 agents: Vec::new(),
+                agent_summary: AgentStatusSummary {
+                    total: 5,
+                    active: 2,
+                    done: 1,
+                    waiting: 1,
+                    busy: 1,
+                    blocked: 1,
+                    unknown: 1,
+                },
             }),
         },
     };

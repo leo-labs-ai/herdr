@@ -18,6 +18,7 @@ impl App {
             id,
             ResponseResult::AgentList {
                 agents: self.collect_agent_infos(),
+                summary: self.state.agent_status_summary(),
             },
         )
     }
@@ -308,7 +309,7 @@ fn agent_not_found(id: String, target: &str) -> String {
 mod tests {
     use super::*;
     use crate::{
-        api::schema::{AgentStatus, SuccessResponse},
+        api::schema::{AgentStatus, EmptyParams, Method, ResponseResult, SuccessResponse},
         app::Mode,
         config::Config,
         detect::{Agent, AgentState},
@@ -330,6 +331,31 @@ mod tests {
         app.state.selected = 0;
         app.state.mode = Mode::Terminal;
         app
+    }
+
+    #[test]
+    fn agent_list_exposes_server_status_summary() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0]
+            .terminal_id(pane_id)
+            .unwrap()
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.detected_agent = Some(Agent::Grok);
+        terminal.state = AgentState::Working;
+
+        let response = app.handle_api_request(crate::api::schema::Request {
+            id: "req_agent_list".into(),
+            method: Method::AgentList(EmptyParams::default()),
+        });
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::AgentList { summary, .. } = success.result else {
+            panic!("expected agent list response");
+        };
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.active, 1);
+        assert_eq!(summary.busy, 1);
     }
 
     #[tokio::test]

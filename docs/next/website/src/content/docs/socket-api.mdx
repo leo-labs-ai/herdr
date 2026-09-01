@@ -118,7 +118,9 @@ Raw socket method names use dot notation:
 `session.snapshot` returns a one-time bootstrap snapshot for clients that keep
 their own local runtime cache. The response includes version/protocol metadata,
 focused workspace/tab/pane ids, workspace records, tab records, pane records,
-tab layout snapshots, and agent records. It is not a subscription. To avoid a
+tab layout snapshots, agent records, and a deduplicated `agent_summary`. Its
+`total`, `active`, `done`, `waiting`, `busy`, `blocked`, and `unknown` fields
+use the same semantics as the sidebar. It is not a subscription. To avoid a
 bootstrap gap, first open `events.subscribe` on another connection and wait for
 its acknowledgement. Buffer that stream while calling `session.snapshot`,
 install the snapshot, then apply the buffered events in order and continue
@@ -126,6 +128,7 @@ streaming. Call `session.snapshot` again after reconnecting or when the local
 cache may be stale. Attached worktree provenance is included on workspace
 records. Full repo worktree discovery remains `worktree.list`.
 
+`agent.list` returns the same `summary` object alongside its agent records.
 From the CLI, `herdr api snapshot` prints the live `session.snapshot` response
 as JSON for clients and agents that want a simple bootstrap command.
 

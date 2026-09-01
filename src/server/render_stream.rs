@@ -477,6 +477,7 @@ mod render_scale_benchmark {
 
     use super::*;
     use crate::app::Mode;
+    use crate::detect::{Agent, AgentState};
     use crate::terminal::TerminalRuntime;
     use crate::workspace::Workspace;
 
@@ -553,6 +554,11 @@ mod render_scale_benchmark {
         app.workspaces = workspaces;
         app.active = Some(0);
         app.selected = 0;
+        app.ensure_test_terminals();
+        for terminal in app.terminals.values_mut() {
+            terminal.detected_agent = Some(Agent::Pi);
+            terminal.state = AgentState::Working;
+        }
         app
     }
 

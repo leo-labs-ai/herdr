@@ -53,6 +53,7 @@ impl App {
             panes: self.collect_panes_for_workspace(None).unwrap_or_default(),
             layouts,
             agents: self.collect_agent_infos(),
+            agent_summary: self.state.agent_status_summary(),
         }
     }
 }
@@ -88,7 +89,7 @@ mod tests {
         });
 
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
-        let ResponseResult::SessionSnapshot { snapshot } = success.result else {
+        let ResponseResult::SessionSnapshot { snapshot, .. } = success.result else {
             panic!("expected session snapshot response");
         };
         assert_eq!(success.id, "req_snapshot");
@@ -108,5 +109,32 @@ mod tests {
             snapshot.focused_pane_id.as_deref(),
             Some(snapshot.panes[0].pane_id.as_str())
         );
+        assert_eq!(snapshot.agent_summary.total, 0);
+    }
+
+    #[test]
+    fn session_snapshot_exposes_agent_summary() {
+        let mut app = app_with_two_tabs();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0]
+            .terminal_id(pane_id)
+            .unwrap()
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.detected_agent = Some(crate::detect::Agent::Claude);
+        terminal.state = crate::detect::AgentState::Blocked;
+
+        let response = app.handle_api_request(crate::api::schema::Request {
+            id: "req_snapshot_summary".into(),
+            method: Method::SessionSnapshot(EmptyParams::default()),
+        });
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::SessionSnapshot { snapshot, .. } = success.result else {
+            panic!("expected session snapshot response");
+        };
+
+        assert_eq!(snapshot.agent_summary.total, 1);
+        assert_eq!(snapshot.agent_summary.active, 1);
+        assert_eq!(snapshot.agent_summary.blocked, 1);
     }
 }

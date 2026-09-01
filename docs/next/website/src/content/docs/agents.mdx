@@ -90,11 +90,13 @@ Herdr can run inside tmux as the outer terminal environment. Agent detection doe
 
 ## State rollups
 
-The sidebar rolls state upward.
+The sidebar rolls state upward. When more than one pane contributes to a roll-up, the attention order is blocked, working, unseen idle (`done`), seen idle (`waiting`), then unknown.
 
 A blocked agent makes its pane, tab, and workspace look blocked. A working agent makes the workspace look active. A done agent stays visible until you view it.
 
 This is the main Herdr workflow: start several agents, let them work in parallel, and use the sidebar to see which project needs a decision, which one is still running, and which one is ready to review.
+
+The desktop Agent section includes a compact server-backed summary. `total` counts unique loaded agent terminals, `active` means busy or blocked, `done` means idle and unseen, and `waiting` means idle and seen. Unknown agents remain in `total` and are reported separately in the API. If one terminal is attached to multiple panes, it is counted once and remains `done` until every attached pane has been seen since the transition. The same summary is available in `session.snapshot` and `agent.list` for remote clients.
 
 ## Direct integrations
 

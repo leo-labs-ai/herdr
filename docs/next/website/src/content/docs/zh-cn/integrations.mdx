@@ -333,6 +333,10 @@ Herdr 默认使用 `~/.grok`,设置了 `GROK_HOME` 时使用后者。Grok 配置
 
 Grok 发出会话启动事件后,Herdr 可以用上报的会话 id 通过 `grok --resume <id>` 恢复窗格。
 
+## Shepherd 与 Grok 机器人边界
+
+Shepherd 的 x.ai bot/template 是在自身环境中运行 Herdr 的外部机器人。它不是 Herdr 集成,也不会自动连接本地 Herdr 服务器、终端或账户。只有在本地 Grok CLI 运行于 Herdr 窗格内时,才使用上面的 Grok CLI 集成。Shepherd 可以使用受支持的服务器/API 投影,包括 `session.snapshot` 或 `agent.list` 状态汇总;双向 Shepherd 控制通道则需要单独记录文档的 API 集成。
+
 ## 自定义状态标签
 
 集成只把生命周期状态作为语义状态上报。例如,上报智能体为 `working` 时,不在生命周期报告中添加展示字段。

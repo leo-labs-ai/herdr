@@ -988,17 +988,13 @@ impl GlobalAgentCounts {
 }
 
 fn global_agent_counts(app: &AppState) -> GlobalAgentCounts {
-    let mut counts = GlobalAgentCounts::default();
-    for entry in crate::ui::all_agent_panel_entries(app) {
-        match (entry.state, entry.seen) {
-            (AgentState::Blocked, _) => counts.blocked += 1,
-            (AgentState::Idle, false) => counts.done += 1,
-            (AgentState::Working, _) => counts.working += 1,
-            (AgentState::Idle, true) => counts.idle += 1,
-            (AgentState::Unknown, _) => {}
-        }
+    let summary = app.agent_status_summary();
+    GlobalAgentCounts {
+        blocked: summary.blocked,
+        done: summary.done,
+        working: summary.busy,
+        idle: summary.waiting,
     }
-    counts
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1036,19 +1032,6 @@ fn agent_summary_segments(
             SummaryTone::Blocked,
         ));
     }
-    if counts.done > 0 {
-        segments.push((
-            agent_summary_text(
-                indicator_style,
-                AgentState::Idle,
-                false,
-                Some("●"),
-                counts.done,
-                "done",
-            ),
-            SummaryTone::Done,
-        ));
-    }
     if counts.working > 0 {
         segments.push((
             agent_summary_text(
@@ -1060,6 +1043,19 @@ fn agent_summary_segments(
                 "working",
             ),
             SummaryTone::Working,
+        ));
+    }
+    if counts.done > 0 {
+        segments.push((
+            agent_summary_text(
+                indicator_style,
+                AgentState::Idle,
+                false,
+                Some("●"),
+                counts.done,
+                "done",
+            ),
+            SummaryTone::Done,
         ));
     }
     if counts.idle > 0 {
@@ -1275,7 +1271,7 @@ mod tests {
         let labels: Vec<&str> = segments.iter().map(|(text, _)| text.as_str()).collect();
         assert_eq!(
             labels,
-            vec!["◉ 2 blocked", "● 1 done", "2 working", "1 idle"]
+            vec!["◉ 2 blocked", "2 working", "● 1 done", "1 idle"]
         );
         assert_eq!(segments[0].1, SummaryTone::Blocked);
     }
@@ -1294,7 +1290,7 @@ mod tests {
             .collect();
         assert_eq!(
             labels,
-            ["× 2 blocked", "✓ 1 done", "◐ 2 working", "○ 1 idle"]
+            ["× 2 blocked", "◐ 2 working", "✓ 1 done", "○ 1 idle"]
         );
     }
 
@@ -1339,7 +1335,7 @@ mod tests {
             .collect();
         assert_eq!(
             labels,
-            vec!["● 1 done".to_string(), "2 working".to_string()]
+            vec!["2 working".to_string(), "● 1 done".to_string()]
         );
     }
 
@@ -1368,7 +1364,7 @@ mod tests {
             24,
         );
         let labels: Vec<&str> = shown.iter().map(|(text, _)| text.as_str()).collect();
-        assert_eq!(labels, vec!["◉ 2 blocked", "● 1 done"]);
+        assert_eq!(labels, vec!["◉ 2 blocked", "2 working"]);
         assert!(truncated);
     }
 
