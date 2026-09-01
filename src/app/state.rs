@@ -1661,6 +1661,63 @@ impl AppState {
             .any(|item| item.state == crate::integration::IntegrationStatusKind::Outdated)
     }
 
+    /// Summarize the loaded agent terminals without counting pane aliases.
+    ///
+    /// A duplicated terminal is `done` only when every attached pane has been
+    /// seen since its last idle transition. This keeps an unseen alias
+    /// attention-worthy while remaining deterministic for remote layouts.
+    pub(crate) fn agent_status_summary(&self) -> crate::api::schema::AgentStatusSummary {
+        // Build the attachment index in one pane pass so this remains linear in
+        // the number of panes and terminals when called from a render frame.
+        let mut attached_agent_terminals =
+            std::collections::HashMap::<&crate::terminal::TerminalId, bool>::new();
+        for workspace in &self.workspaces {
+            for tab in &workspace.tabs {
+                for pane in tab.panes.values() {
+                    if self
+                        .terminals
+                        .get(&pane.attached_terminal_id)
+                        .is_some_and(crate::terminal::TerminalState::is_agent_terminal)
+                    {
+                        attached_agent_terminals
+                            .entry(&pane.attached_terminal_id)
+                            .and_modify(|all_seen| *all_seen &= pane.seen)
+                            .or_insert(pane.seen);
+                    }
+                }
+            }
+        }
+
+        let mut summary = crate::api::schema::AgentStatusSummary::default();
+        for (terminal_id, terminal) in &self.terminals {
+            let Some(all_seen) = attached_agent_terminals.get(terminal_id) else {
+                continue;
+            };
+
+            summary.total += 1;
+            match terminal.state {
+                AgentState::Blocked => {
+                    summary.blocked += 1;
+                    summary.active += 1;
+                }
+                AgentState::Working => {
+                    summary.busy += 1;
+                    summary.active += 1;
+                }
+                AgentState::Idle => {
+                    if *all_seen {
+                        summary.waiting += 1;
+                    } else {
+                        summary.done += 1;
+                    }
+                }
+                AgentState::Unknown => summary.unknown += 1,
+            }
+        }
+
+        summary
+    }
+
     pub(crate) fn refresh_agent_manifest_summaries(&mut self) {
         self.agent_manifest_summaries = crate::detect::manifest::manifest_summaries();
     }
@@ -2354,6 +2411,144 @@ impl AppState {
 mod tests {
     use super::*;
     use crossterm::event::KeyEvent;
+
+    fn mark_agent(state: &mut AppState, pane_id: PaneId, agent_state: AgentState) {
+        let terminal_id = state.workspaces[0].terminal_id(pane_id).unwrap().clone();
+        let terminal = state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.detected_agent = Some(crate::detect::Agent::Pi);
+        terminal.state = agent_state;
+    }
+
+    #[test]
+    fn agent_status_summary_is_empty_without_agents() {
+        assert_eq!(
+            AppState::test_new().agent_status_summary(),
+            crate::api::schema::AgentStatusSummary::default()
+        );
+    }
+
+    #[test]
+    fn agent_status_summary_prioritizes_mixed_states_and_counts_unknown() {
+        let mut state = AppState::test_new();
+        let mut workspace = crate::workspace::Workspace::test_new("mixed");
+        for _ in 0..4 {
+            workspace.test_split(ratatui::layout::Direction::Horizontal);
+        }
+        state.workspaces = vec![workspace];
+        state.ensure_test_terminals();
+        let panes = state.workspaces[0].tabs[0].layout.pane_ids();
+        for (pane_id, agent_state) in panes.iter().copied().zip([
+            AgentState::Blocked,
+            AgentState::Working,
+            AgentState::Idle,
+            AgentState::Idle,
+            AgentState::Unknown,
+        ]) {
+            mark_agent(&mut state, pane_id, agent_state);
+        }
+        state.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&panes[2])
+            .unwrap()
+            .seen = false;
+
+        assert_eq!(
+            state.agent_status_summary(),
+            crate::api::schema::AgentStatusSummary {
+                total: 5,
+                active: 2,
+                done: 1,
+                waiting: 1,
+                busy: 1,
+                blocked: 1,
+                unknown: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn agent_status_summary_tracks_idle_seen_transitions() {
+        let mut state = AppState::test_new();
+        state.workspaces = vec![crate::workspace::Workspace::test_new("transition")];
+        state.ensure_test_terminals();
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+        mark_agent(&mut state, pane_id, AgentState::Working);
+        assert_eq!(state.agent_status_summary().busy, 1);
+        assert_eq!(state.agent_status_summary().active, 1);
+
+        mark_agent(&mut state, pane_id, AgentState::Idle);
+        state.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&pane_id)
+            .unwrap()
+            .seen = false;
+        assert_eq!(state.agent_status_summary().done, 1);
+        assert_eq!(state.agent_status_summary().waiting, 0);
+
+        state.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&pane_id)
+            .unwrap()
+            .seen = true;
+        assert_eq!(state.agent_status_summary().waiting, 1);
+        assert_eq!(state.agent_status_summary().done, 0);
+    }
+
+    #[test]
+    fn agent_status_summary_deduplicates_terminal_aliases() {
+        let mut state = AppState::test_new();
+        let mut workspace = crate::workspace::Workspace::test_new("duplicate");
+        let second_pane = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        let first_pane = workspace.tabs[0].root_pane;
+        state.workspaces = vec![workspace];
+        state.ensure_test_terminals();
+        let first_terminal_id = state.workspaces[0].terminal_id(first_pane).unwrap().clone();
+        state.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&second_pane)
+            .unwrap()
+            .attached_terminal_id = first_terminal_id.clone();
+        mark_agent(&mut state, first_pane, AgentState::Idle);
+        state.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&first_pane)
+            .unwrap()
+            .seen = true;
+        state.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&second_pane)
+            .unwrap()
+            .seen = false;
+
+        let summary = state.agent_status_summary();
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.done, 1);
+        assert_eq!(summary.waiting, 0);
+    }
+
+    #[test]
+    fn agent_status_summary_includes_background_workspaces() {
+        let mut state = AppState::test_new();
+        state.workspaces = vec![
+            crate::workspace::Workspace::test_new("active"),
+            crate::workspace::Workspace::test_new("background"),
+        ];
+        state.active = Some(0);
+        state.ensure_test_terminals();
+        let background_pane = state.workspaces[1].tabs[0].root_pane;
+        let background_terminal = state.workspaces[1]
+            .terminal_id(background_pane)
+            .unwrap()
+            .clone();
+        let terminal = state.terminals.get_mut(&background_terminal).unwrap();
+        terminal.detected_agent = Some(crate::detect::Agent::Grok);
+        terminal.state = AgentState::Working;
+
+        let summary = state.agent_status_summary();
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.active, 1);
+        assert_eq!(summary.busy, 1);
+    }
 
     #[test]
     fn pane_size_estimate_uses_headless_size_before_first_view() {

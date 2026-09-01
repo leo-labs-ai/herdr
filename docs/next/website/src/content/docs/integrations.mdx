@@ -331,6 +331,12 @@ Herdr uses `~/.grok` by default, or `GROK_HOME` when set. The Grok config direct
 
 After Grok emits a session start event, Herdr can use the reported session id to resume the pane with `grok --resume <id>`.
 
+Re-running the install is the v1 migration path: it refreshes only Herdr's two owned files and preserves every other Grok hook. Uninstall removes those same two files. The hook is session-identity-only; it does not grant Herdr or Shepherd control of a Grok/xAI account.
+
+## Shepherd and Grok bot boundary
+
+Shepherd's x.ai bot/template is an external bot that runs Herdr in its own environment. It is not a Herdr integration and does not automatically connect to a local Herdr server, terminal, or account. Use the Grok CLI integration above only when the local Grok CLI is running inside a Herdr pane. Shepherd can consume the supported server/API projection, including `session.snapshot` or `agent.list` status summaries, but a bidirectional Shepherd control channel requires an independently documented API integration.
+
 ## Custom status labels
 
 Integrations report lifecycle state as semantic state only. For example, report an agent as `working` without adding display fields to the lifecycle report.

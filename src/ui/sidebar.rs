@@ -12,6 +12,7 @@ use self::tokens::{ResolvedToken, ResolvedTokenKind, SpaceTokenContext};
 use super::scrollbar::{render_scrollbar, should_show_scrollbar};
 use super::status::{state_icon, state_label, state_label_color};
 use super::text::{display_width, display_width_u16, truncate_end};
+use crate::api::schema::AgentStatusSummary;
 use crate::app::state::{AgentPanelSort, Palette};
 use crate::app::{AppState, Mode};
 use crate::detect::AgentState;
@@ -111,10 +112,6 @@ fn active_agent_view_label(app: &AppState) -> Option<&str> {
 
 pub(crate) fn agent_panel_entries(app: &AppState) -> Vec<AgentPanelEntry> {
     agent_panel_entries_with_runtimes(app, None)
-}
-
-pub(crate) fn all_agent_panel_entries(app: &AppState) -> Vec<AgentPanelEntry> {
-    collect_agent_panel_entries_with_runtimes(app, None)
 }
 
 pub(crate) fn agent_panel_entries_from(
@@ -540,6 +537,103 @@ pub(crate) fn agent_panel_body_rect(area: Rect, has_scrollbar: bool) -> Rect {
     let body_height = (area.y + area.height).saturating_sub(body_y);
     let body_width = area.width.saturating_sub(u16::from(has_scrollbar));
     Rect::new(area.x, body_y, body_width, body_height)
+}
+
+#[derive(Clone, Copy)]
+enum AgentSummaryTone {
+    Neutral,
+    Done,
+    Waiting,
+    Busy,
+    Blocked,
+    Unknown,
+}
+
+fn agent_summary_segments(summary: AgentStatusSummary) -> Vec<(String, AgentSummaryTone)> {
+    if summary.total == 0 {
+        return vec![("0 agents".to_string(), AgentSummaryTone::Neutral)];
+    }
+
+    let mut segments = vec![
+        (
+            format!("{} agents", summary.total),
+            AgentSummaryTone::Neutral,
+        ),
+        (
+            format!("{} active", summary.active),
+            AgentSummaryTone::Neutral,
+        ),
+    ];
+    for (count, label, tone) in [
+        (summary.blocked, "blocked", AgentSummaryTone::Blocked),
+        (summary.busy, "busy", AgentSummaryTone::Busy),
+        (summary.done, "done", AgentSummaryTone::Done),
+        (summary.waiting, "waiting", AgentSummaryTone::Waiting),
+        (summary.unknown, "unknown", AgentSummaryTone::Unknown),
+    ] {
+        if count > 0 {
+            segments.push((format!("{count} {label}"), tone));
+        }
+    }
+    segments
+}
+
+fn fit_agent_summary_segments(
+    segments: Vec<(String, AgentSummaryTone)>,
+    max_width: usize,
+) -> (Vec<(String, AgentSummaryTone)>, bool) {
+    let mut shown = Vec::new();
+    let mut used = 1usize;
+    for (index, segment) in segments.iter().enumerate() {
+        let separator = if index == 0 { 0 } else { 3 };
+        let width = display_width(&segment.0);
+        if used + separator + width > max_width {
+            break;
+        }
+        used += separator + width;
+        shown.push(segment.clone());
+    }
+    let truncated = shown.len() < segments.len();
+    (shown, truncated)
+}
+
+fn agent_summary_line(app: &AppState, p: &Palette, max_width: u16) -> Line<'static> {
+    let (segments, truncated) = fit_agent_summary_segments(
+        agent_summary_segments(app.agent_status_summary()),
+        max_width as usize,
+    );
+    let mut spans = vec![Span::styled(" ", Style::default().bg(p.sidebar_bg))];
+    let mut used = 1usize;
+    for (index, (text, tone)) in segments.into_iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(
+                " · ",
+                Style::default().fg(p.surface0).bg(p.sidebar_bg),
+            ));
+            used += 3;
+        }
+        let color = match tone {
+            AgentSummaryTone::Blocked => p.red,
+            AgentSummaryTone::Done => p.blue,
+            AgentSummaryTone::Busy => p.yellow,
+            AgentSummaryTone::Waiting => p.overlay1,
+            AgentSummaryTone::Unknown => p.overlay0,
+            AgentSummaryTone::Neutral => p.overlay0,
+        };
+        let text_width = display_width(&text);
+        spans.push(Span::styled(
+            text,
+            Style::default().fg(color).bg(p.sidebar_bg),
+        ));
+        used += text_width;
+    }
+    if truncated && used + 2 <= max_width as usize {
+        spans.push(Span::styled(
+            " …",
+            Style::default().fg(p.overlay0).bg(p.sidebar_bg),
+        ));
+    }
+    Line::from(spans)
 }
 
 fn resolved_agent_rows(app: &AppState, entry: &AgentPanelEntry) -> Vec<Vec<ResolvedToken>> {
@@ -1473,6 +1567,11 @@ fn render_agent_detail(
         );
     }
 
+    frame.render_widget(
+        Paragraph::new(agent_summary_line(app, p, area.width)),
+        Rect::new(area.x, area.y + 2, area.width, 1),
+    );
+
     let details = agent_panel_entries_from(app, terminal_runtimes);
     let metrics = agent_panel_scroll_metrics(app, area);
     let scrollbar_rect = agent_panel_scrollbar_rect(app, area);
@@ -1648,6 +1747,83 @@ mod tests {
             .content
             .iter()
             .all(|cell| cell.bg == app.palette.sidebar_bg));
+    }
+
+    #[test]
+    fn agent_summary_lists_loaded_and_attention_states() {
+        let mut app = crate::app::state::AppState::test_new();
+        let mut workspace = Workspace::test_new("summary");
+        for _ in 0..4 {
+            workspace.test_split(ratatui::layout::Direction::Horizontal);
+        }
+        app.workspaces = vec![workspace];
+        app.ensure_test_terminals();
+        let panes = app.workspaces[0].tabs[0].layout.pane_ids();
+        for (pane_id, agent_state) in panes.iter().copied().zip([
+            AgentState::Blocked,
+            AgentState::Working,
+            AgentState::Idle,
+            AgentState::Idle,
+            AgentState::Unknown,
+        ]) {
+            let terminal_id = app.workspaces[0].terminal_id(pane_id).unwrap().clone();
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(Agent::Pi);
+            terminal.state = agent_state;
+        }
+        app.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&panes[2])
+            .unwrap()
+            .seen = false;
+
+        let area = Rect::new(0, 0, 80, 8);
+        let mut terminal = Terminal::new(TestBackend::new(80, 8)).unwrap();
+        terminal
+            .draw(|frame| render_agent_detail(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let summary = row_text(terminal.backend().buffer(), 2, 80);
+        let labels: Vec<_> = agent_summary_segments(app.agent_status_summary())
+            .into_iter()
+            .map(|(label, _)| label)
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "5 agents",
+                "2 active",
+                "1 blocked",
+                "1 busy",
+                "1 done",
+                "1 waiting",
+                "1 unknown",
+            ]
+        );
+        for label in labels {
+            assert!(summary.contains(&label));
+        }
+    }
+
+    #[test]
+    fn agent_summary_fits_narrow_sidebar_without_overflow() {
+        let mut app = crate::app::state::AppState::test_new();
+        let workspace = Workspace::test_new("narrow");
+        let pane_id = workspace.tabs[0].root_pane;
+        app.workspaces = vec![workspace];
+        app.ensure_test_terminals();
+        let terminal_id = app.workspaces[0].terminal_id(pane_id).unwrap().clone();
+        let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+        terminal.detected_agent = Some(Agent::Grok);
+        terminal.state = AgentState::Blocked;
+
+        let area = Rect::new(0, 0, 18, 4);
+        let mut terminal = Terminal::new(TestBackend::new(18, 4)).unwrap();
+        terminal
+            .draw(|frame| render_agent_detail(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let summary = row_text(terminal.backend().buffer(), 2, 18);
+        assert!(display_width(&summary) <= 18);
+        assert!(summary.contains("1 agents"));
     }
 
     #[test]

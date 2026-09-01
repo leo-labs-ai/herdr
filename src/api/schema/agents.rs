@@ -180,6 +180,27 @@ pub struct AgentPromptParams {
     pub wait: Option<AgentPromptWaitOptions>,
 }
 
+/// A deduplicated roll-up of agent instances in the server session.
+///
+/// `active` counts agents currently doing work or awaiting input
+/// (`busy + blocked`). `done` is an unseen idle agent and `waiting` is an
+/// idle agent whose attached panes have all been seen since the last state
+/// transition. Unknown agents are included in `total` but not `active`; they
+/// are exposed separately so clients can account for every loaded instance.
+/// Roll-up attention priority remains blocked > busy > done > waiting > unknown.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+pub struct AgentStatusSummary {
+    pub total: usize,
+    pub active: usize,
+    pub done: usize,
+    pub waiting: usize,
+    pub busy: usize,
+    pub blocked: usize,
+    pub unknown: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentInfo {
     pub terminal_id: String,

@@ -6363,6 +6363,56 @@
           ],
           "type": "string"
         },
+        "AgentStatusSummary": {
+          "description": "A deduplicated roll-up of agent instances in the server session.\n\n`active` counts agents currently doing work or awaiting input\n(`busy + blocked`). `done` is an unseen idle agent and `waiting` is an\nidle agent whose attached panes have all been seen since the last state\ntransition. Unknown agents are included in `total` but not `active`; they\nare exposed separately so clients can account for every loaded instance.\nRoll-up attention priority remains blocked > busy > done > waiting > unknown.",
+          "properties": {
+            "active": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "blocked": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "busy": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "done": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "total": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "unknown": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "waiting": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "total",
+            "active",
+            "done",
+            "waiting",
+            "busy",
+            "blocked",
+            "unknown"
+          ],
+          "type": "object"
+        },
         "ClientWindowTitleReason": {
           "enum": [
             "set",
@@ -8982,6 +9032,18 @@
                   },
                   "type": "array"
                 },
+                "summary": {
+                  "$ref": "#/schemas/success_response/$defs/AgentStatusSummary",
+                  "default": {
+                    "active": 0,
+                    "blocked": 0,
+                    "busy": 0,
+                    "done": 0,
+                    "total": 0,
+                    "unknown": 0,
+                    "waiting": 0
+                  }
+                },
                 "type": {
                   "const": "agent_list",
                   "type": "string"
@@ -9839,6 +9901,18 @@
         },
         "SessionSnapshot": {
           "properties": {
+            "agent_summary": {
+              "$ref": "#/schemas/success_response/$defs/AgentStatusSummary",
+              "default": {
+                "active": 0,
+                "blocked": 0,
+                "busy": 0,
+                "done": 0,
+                "total": 0,
+                "unknown": 0,
+                "waiting": 0
+              }
+            },
             "agents": {
               "items": {
                 "$ref": "#/schemas/success_response/$defs/AgentInfo"
