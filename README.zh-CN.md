@@ -1,5 +1,8 @@
 # herdr
 
+> **品牌 leo-labs**（Leonardo + leopard）。GitHub 组织 slug 仍是 `lue-labs`，计划改为 **`leo-labs-ai`**。本次不改 npm `@lue-labs/*`、`ghcr.io/lue-labs/*` 或 clone URL。Decision `leo-labs-rename-20261003`.
+
+
 
 <p align="center">
   <img src="assets/logo.png" alt="herdr" width="100" />
